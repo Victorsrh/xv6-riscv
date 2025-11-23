@@ -110,7 +110,8 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-
+  p->tickets =1;
+  p->ticks = 0;
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
