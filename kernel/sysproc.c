@@ -6,6 +6,9 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "vm.h"
+#include "pstat.h"
+
+extern struct proc proc[NPROC];
 
 uint64
 sys_exit(void)
@@ -107,3 +110,57 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_settickets(void)
+{
+   int n;
+
+   if (argint(0, &n) < 0)
+      return -1;
+
+   if (n < 1)
+      return -1;
+
+   struct proc *p = myproc();
+
+   p->tickets = n;
+
+   return 0;
+}
+
+uint64
+sys_getpinfo(void)
+{
+  uint64 up;           // “user pointer”: where to put the box in user memory
+  struct pstat ps;     // our big box in kernel memory
+  struct proc *p;
+  int i = 0;
+
+  // Get the address from the user (the first argument of getpinfo)
+  if (argaddr(0, &up) < 0)
+    return -1;
+
+  // Fill the box
+  acquire(&tickslock);               
+  for (p = proc; p < &proc[NPROC]; p++, i++) {
+    if (p->state != UNUSED) {
+      ps.inuse[i]   = 1;
+      ps.tickets[i] = p->tickets;
+      ps.pid[i]     = p->pid;
+      ps.ticks[i]   = p->ticks;      
+    } else {
+      ps.inuse[i]   = 0;
+      ps.tickets[i] = 0;
+      ps.pid[i]     = 0;
+      ps.ticks[i]   = 0;
+    }
+  }
+  release(&tickslock);
+
+  if (copyout(myproc()->pagetable, up, (char *)&ps, sizeof(ps)) < 0)
+    return -1;
+
+  return 0;
+}
+
