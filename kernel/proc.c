@@ -43,6 +43,13 @@ proc_mapstacks(pagetable_t kpgtbl)
   }
 }
 
+uint64
+krand(void)
+{
+  return r_time();
+}
+
+
 // initialize the proc table.
 void
 procinit(void)
@@ -430,38 +437,53 @@ scheduler(void)
 
   c->proc = 0;
   for(;;){
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
     intr_on();
-    intr_off();
 
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
+    int total = 0;
+
+    // Count total tickets of RUNNABLE processes
+    for(p = proc; p < &proc[NPROC]; p++){
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+      if(p->state == RUNNABLE){
+        total += p->tickets;
       }
       release(&p->lock);
     }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
+
+    if(total == 0){
+      intr_off();
       asm volatile("wfi");
+      continue;
+    }
+
+    int winner = krand() % total;
+    int sum = 0;
+
+    // Find the process that wins the lottery
+    for(p = proc; p < &proc[NPROC]; p++){
+      acquire(&p->lock);
+      if(p->state == RUNNABLE){
+        sum += p->tickets;
+        if(sum > winner){
+
+          p->state = RUNNING;
+          c->proc = p;
+
+          p->ticks++;        // <-- CPU time accounting
+
+          swtch(&c->context, &p->context);
+
+          c->proc = 0;
+          release(&p->lock);
+          break;
+        }
+      }
+      release(&p->lock);
     }
   }
 }
+
+
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
